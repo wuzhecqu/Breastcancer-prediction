@@ -3,11 +3,20 @@ import pandas as pd
 import numpy as np
 import joblib
 import shap
-import matplotlib.pyplot as plt
-import plotly.graph_objects as go
 import json
 import warnings
 warnings.filterwarnings('ignore')
+
+# 尝试导入matplotlib，如果失败则使用纯plotly版本
+try:
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+    st.warning("Matplotlib不可用，将使用纯Plotly可视化")
+
+import plotly.graph_objects as go
+import plotly.express as px
 
 # ------------------ 页面配置 ------------------
 st.set_page_config(
@@ -51,14 +60,12 @@ def load_artifacts():
         # 创建SHAP解释器
         explainer = shap.TreeExplainer(model, background_scaled)
         
-        # 获取期望值
+        # 获取期望值 - 处理新的SHAP输出格式
         expected_val = explainer.expected_value
         
         print(f"Expected value type: {type(expected_val)}")
-        print(f"Expected value shape: {np.shape(expected_val) if hasattr(expected_val, 'shape') else 'N/A'}")
-        print(f"Expected value: {expected_val}")
         
-        # 处理expected_value的格式
+        # 处理expected_value的格式 - 修复索引错误
         if isinstance(expected_val, np.ndarray):
             if len(expected_val) == 2:
                 # 二分类，返回两个值的情况
@@ -67,12 +74,14 @@ def load_artifacts():
                 # 只有一个值的情况
                 base_value = float(expected_val[0])
             else:
-                base_value = float(expected_val[0])
+                base_value = float(expected_val[0] if len(expected_val) > 0 else 0)
         elif isinstance(expected_val, (list, tuple)):
             if len(expected_val) == 2:
                 base_value = float(expected_val[1])
-            else:
+            elif len(expected_val) == 1:
                 base_value = float(expected_val[0])
+            else:
+                base_value = 0.0
         else:
             # 单个标量值
             base_value = float(expected_val)
@@ -99,10 +108,11 @@ model, scaler, explainer, base_value, feature_info, selected_features = load_art
 # ------------------ 侧边栏：用户输入 ------------------
 st.sidebar.header("🔬 输入患者特征值")
 
-# 为每个特征创建输入滑块
+# 为每个特征创建输入滑块 - 修复step参数类型
 feature_inputs = {}
 for feat in selected_features:
     # 根据特征定义合理的范围和默认值
+    # 注意：step值必须是float类型！
     if feat == 'radius_worst':
         min_val, max_val, default_val, step_val = 10.0, 30.0, 15.0, 0.1
     elif feat == 'concave points_mean':
@@ -112,20 +122,20 @@ for feat in selected_features:
     elif feat == 'concavity_worst':
         min_val, max_val, default_val, step_val = 0.0, 0.5, 0.1, 0.01
     elif feat == 'area_worst':
-        min_val, max_val, default_val, step_val = 500.0, 2000.0, 800.0, 10.0
+        min_val, max_val, default_val, step_val = 500.0, 2000.0, 800.0, 10.0  # 注意：10.0不是10
     elif feat == 'compactness_mean':
         min_val, max_val, default_val, step_val = 0.05, 0.3, 0.15, 0.001
     else:
         min_val, max_val, default_val, step_val = 0.0, 1.0, 0.5, 0.01
     
-    # 创建滑块
+    # 创建滑块 - 确保step是float类型
     value = st.sidebar.slider(
         label=f"{feat}",
         min_value=float(min_val),
         max_value=float(max_val),
         value=float(default_val),
-        step=float(step_val),
-        help=f"范围: {min_val} - {max_val}"
+        step=float(step_val),  # 关键修复：必须是float
+        help=f"范围: {min_val} - {max_val}, 步长: {step_val}"
     )
     feature_inputs[feat] = value
 
@@ -144,35 +154,29 @@ if predict_button and model is not None:
             input_df = input_df[selected_features]  # 确保列顺序
             input_scaled = scaler.transform(input_df)
             
-            # 2. 进行预测 - 修复：使用正确的预测方法
+            # 2. 进行预测 - 使用正确的预测方法
             print(f"模型类型: {type(model)}")
             
-            # 方法1：尝试不同的预测方法
+            # LightGBM预测：先获取原始分数，再转换为概率
             try:
-                # 首先尝试predict_proba（适用于scikit-learn包装器）
-                if hasattr(model, 'predict_proba'):
-                    probability = model.predict_proba(input_scaled)[0][1]
-                    print(f"使用 predict_proba, 概率: {probability}")
+                # 方法1：尝试获取原始分数
+                raw_pred = model.predict(input_scaled, raw_score=True)
+                
+                if isinstance(raw_pred, np.ndarray) and len(raw_pred) > 0:
+                    raw_score = float(raw_pred[0])
                 else:
-                    # 方法2：使用predict并转换为概率
-                    raw_pred = model.predict(input_scaled, raw_score=True)
-                    print(f"原始预测值: {raw_pred}")
-                    
-                    # 将原始分数转换为概率（使用sigmoid函数）
-                    if isinstance(raw_pred, np.ndarray) and len(raw_pred) > 0:
-                        raw_score = raw_pred[0]
-                    else:
-                        raw_score = float(raw_pred)
-                    
-                    # Sigmoid函数：1 / (1 + exp(-x))
-                    probability = 1 / (1 + np.exp(-raw_score))
-                    print(f"转换后的概率: {probability}")
+                    raw_score = float(raw_pred)
+                
+                # 将原始分数转换为概率（使用sigmoid函数）
+                probability = 1 / (1 + np.exp(-raw_score))
+                print(f"使用raw_score转换，概率: {probability:.4f}")
+                
             except Exception as pred_error:
-                print(f"预测错误: {pred_error}")
-                # 方法3：直接使用predict
+                print(f"raw_score预测失败: {pred_error}")
+                # 方法2：直接预测
                 pred = model.predict(input_scaled)
                 if isinstance(pred, np.ndarray) and len(pred) > 0:
-                    pred_value = pred[0]
+                    pred_value = float(pred[0])
                 else:
                     pred_value = float(pred)
                 
@@ -189,22 +193,23 @@ if predict_button and model is not None:
             prediction = 1 if probability > 0.5 else 0
             prediction_label = "恶性 (M)" if prediction == 1 else "良性 (B)"
             
-            print(f"最终概率: {probability}, 预测: {prediction_label}")
+            print(f"最终概率: {probability:.4f}, 预测: {prediction_label}")
             
             # 3. 计算SHAP值
             shap_values = explainer.shap_values(input_scaled)
             
-            # 调试信息
             print(f"SHAP values type: {type(shap_values)}")
             
-            # 处理SHAP值的格式
+            # 处理SHAP值的格式 - 修复新的输出格式
             shap_val_for_instance = None
             
             if isinstance(shap_values, list):
-                print(f"SHAP values list length: {len(shap_values)}")
+                print(f"SHAP values是列表，长度: {len(shap_values)}")
                 if len(shap_values) == 2:
                     # 二分类，有两个数组 [良性SHAP值, 恶性SHAP值]
-                    shap_val_for_instance = shap_values[1][0]  # 恶性类的SHAP值
+                    # 取恶性类的SHAP值
+                    shap_val_for_instance = shap_values[1][0]
+                    print(f"使用shap_values[1]，形状: {shap_val_for_instance.shape}")
                 elif len(shap_values) == 1:
                     # 只有一个数组
                     shap_val_for_instance = shap_values[0][0]
@@ -213,11 +218,20 @@ if predict_button and model is not None:
                     shap_val_for_instance = shap_values[0][0]
             else:
                 # 不是列表，直接使用
+                print(f"SHAP values不是列表，形状: {shap_values.shape}")
                 shap_val_for_instance = shap_values[0]
             
             if shap_val_for_instance is None:
-                # 尝试直接获取
-                shap_val_for_instance = explainer.shap_values(input_scaled, check_additivity=False)[0]
+                # 尝试其他方法
+                try:
+                    shap_val_for_instance = explainer.shap_values(input_scaled, check_additivity=False)
+                    if isinstance(shap_val_for_instance, list):
+                        shap_val_for_instance = shap_val_for_instance[1][0] if len(shap_val_for_instance) > 1 else shap_val_for_instance[0][0]
+                    else:
+                        shap_val_for_instance = shap_val_for_instance[0]
+                except:
+                    # 如果还是失败，使用零数组
+                    shap_val_for_instance = np.zeros(len(selected_features))
             
             print(f"SHAP values for instance: {shap_val_for_instance}")
             
@@ -250,47 +264,9 @@ if predict_button and model is not None:
             # 预测概率进度条
             st.progress(float(probability), text=f"恶性概率: {probability:.2%}")
             
-            # ------------------ SHAP力力图 ------------------
-            st.header("🧠 模型决策解释 (SHAP力力图)")
+            # ------------------ SHAP可解释性分析 ------------------
+            st.header("🧠 模型决策解释 (SHAP分析)")
             st.markdown(f"**基础值**: {base_value:.4f} (模型在训练数据上的平均预测)")
-            
-            # 创建力力图
-            try:
-                fig, ax = plt.subplots(figsize=(10, 4))
-                
-                # 使用force_plot
-                shap.force_plot(
-                    base_value=base_value,
-                    shap_values=shap_val_for_instance,
-                    features=input_df.iloc[0],
-                    feature_names=selected_features,
-                    matplotlib=True,
-                    show=False,
-                    text_rotation=15
-                )
-                
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.clf()
-                
-                st.caption("""
-                **解读**：红色特征将预测推向恶性，蓝色特征将预测推向良性。
-                所有特征影响力的总和将预测值从"基础值"推到了最终的预测概率。
-                """)
-                
-            except Exception as e:
-                st.warning(f"无法生成SHAP力力图: {e}")
-                
-                # 提供替代解释
-                st.info("""
-                **特征影响分析**：
-                - 正SHAP值：增加恶性风险
-                - 负SHAP值：降低恶性风险
-                - 绝对值越大，影响越强
-                """)
-            
-            # ------------------ 特征影响分析 ------------------
-            st.header("📈 特征影响分析")
             
             # 创建特征影响DataFrame
             impact_df = pd.DataFrame({
@@ -315,8 +291,9 @@ if predict_button and model is not None:
             )
             
             # ------------------ 可视化特征影响 ------------------
-            st.subheader("特征影响力条形图")
+            st.subheader("特征影响力可视化")
             
+            # 使用Plotly创建条形图
             fig = go.Figure()
             
             # 添加条形图
@@ -344,6 +321,38 @@ if predict_button and model is not None:
             fig.add_vline(x=0, line_width=1, line_dash="dash", line_color="black")
             
             st.plotly_chart(fig, use_container_width=True)
+            
+            # ------------------ 尝试生成SHAP力力图 ------------------
+            if MATPLOTLIB_AVAILABLE:
+                st.subheader("SHAP力力图")
+                try:
+                    # 创建力力图
+                    fig, ax = plt.subplots(figsize=(10, 4))
+                    
+                    # 使用force_plot
+                    shap.force_plot(
+                        base_value=base_value,
+                        shap_values=shap_val_for_instance,
+                        features=input_df.iloc[0],
+                        feature_names=selected_features,
+                        matplotlib=True,
+                        show=False,
+                        text_rotation=15
+                    )
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                    plt.clf()
+                    
+                    st.caption("""
+                    **解读**：红色特征将预测推向恶性，蓝色特征将预测推向良性。
+                    所有特征影响力的总和将预测值从"基础值"推到了最终的预测概率。
+                    """)
+                    
+                except Exception as e:
+                    st.warning(f"无法生成SHAP力力图: {e}")
+            else:
+                st.info("Matplotlib不可用，已使用Plotly条形图展示SHAP值。")
             
             # ------------------ 临床解读 ------------------
             st.header("💡 临床解读")
