@@ -5,7 +5,6 @@ import joblib
 import shap
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import json
 import warnings
 warnings.filterwarnings('ignore')
@@ -27,39 +26,58 @@ def load_artifacts():
         scaler = joblib.load('scaler.pkl')
         
         # 加载特征信息
-        with open('feature_info.json', 'r', encoding='utf-8') as f:
-            feature_info = json.load(f)
+        try:
+            with open('feature_info.json', 'r', encoding='utf-8') as f:
+                feature_info = json.load(f)
+            selected_features = feature_info.get('selected_features', [
+                'radius_worst', 'concave points_mean', 'radius_se',
+                'concavity_worst', 'area_worst', 'compactness_mean'
+            ])
+        except:
+            # 如果feature_info.json不存在或格式错误，使用默认特征
+            selected_features = [
+                'radius_worst', 'concave points_mean', 'radius_se',
+                'concavity_worst', 'area_worst', 'compactness_mean'
+            ]
+            feature_info = {'selected_features': selected_features}
         
-        # 获取选中的特征
-        selected_features = feature_info.get('selected_features', [
-            'radius_worst', 'concave points_mean', 'radius_se',
-            'concavity_worst', 'area_worst', 'compactness_mean'
-        ])
-        
-        # 创建背景数据用于SHAP解释器（简化版本，使用零矩阵）
-        background = pd.DataFrame(
-            np.zeros((10, len(selected_features))),
-            columns=selected_features
-        )
-        background_scaled = scaler.transform(background)
+        # 创建背景数据用于SHAP解释器
+        # 使用简化的小样本背景数据
+        background = np.zeros((5, len(selected_features)))
+        background_df = pd.DataFrame(background, columns=selected_features)
+        background_scaled = scaler.transform(background_df)
         
         # 创建SHAP解释器
-        explainer = shap.TreeExplainer(model, background_scaled, model_output='probability')
+        explainer = shap.TreeExplainer(model, background_scaled)
         
-        # 获取期望值（预测恶性概率的基础值）
-        # 对于二分类，expected_value[1] 是恶性类的基础概率
+        # 获取期望值 - 处理不同格式
         expected_val = explainer.expected_value
         
+        # 调试信息
+        print(f"Expected value type: {type(expected_val)}")
+        print(f"Expected value shape: {np.shape(expected_val)}")
+        print(f"Expected value: {expected_val}")
+        
         # 处理expected_value的格式
-        if isinstance(expected_val, np.ndarray) and len(expected_val) > 1:
-            base_value = expected_val[1]  # 恶性类的基础值
+        if isinstance(expected_val, np.ndarray):
+            if len(expected_val) == 2:
+                # 二分类，返回两个值的情况
+                base_value = float(expected_val[1])  # 恶性类的基础值
+            elif len(expected_val) == 1:
+                # 只有一个值的情况
+                base_value = float(expected_val[0])
+            else:
+                base_value = float(expected_val[0])
         else:
-            base_value = float(expected_val) if isinstance(expected_val, np.ndarray) else float(expected_val)
+            # 单个标量值
+            base_value = float(expected_val)
+        
+        print(f"Base value for SHAP: {base_value}")
         
         return model, scaler, explainer, base_value, feature_info, selected_features
         
     except Exception as e:
-        st.error(f"加载模型组件失败: {e}")
+        print(f"Error loading artifacts: {e}")
         # 返回默认值
         selected_features = [
             'radius_worst', 'concave points_mean', 'radius_se',
@@ -92,7 +110,7 @@ for feat in selected_features:
     else:
         min_val, max_val, default_val, step_val = 0.0, 1.0, 0.5, 0.01
     
-    # 创建滑块 - 确保所有参数都是float类型
+    # 创建滑块
     value = st.sidebar.slider(
         label=f"{feat}",
         min_value=float(min_val),
@@ -119,19 +137,35 @@ if predict_button and model is not None:
             input_scaled = scaler.transform(input_df)
             
             # 2. 进行预测
-            probability = model.predict(input_scaled, raw_score=False)[0]  # 获取概率
+            # LightGBM预测恶性概率
+            probability = model.predict_proba(input_scaled)[0][1]  # 获取恶性类概率
             prediction = 1 if probability > 0.5 else 0
             prediction_label = "恶性 (M)" if prediction == 1 else "良性 (B)"
             
             # 3. 计算SHAP值
             shap_values = explainer.shap_values(input_scaled)
             
-            # 处理SHAP值的格式
+            # 调试信息
+            print(f"SHAP values type: {type(shap_values)}")
+            print(f"SHAP values length if list: {len(shap_values) if isinstance(shap_values, list) else 'Not list'}")
+            
+            # 处理SHAP值的格式 - 根据警告信息，SHAP值现在是列表格式
             if isinstance(shap_values, list):
-                # 对于二分类，shap_values[1] 对应恶性类
-                shap_val_for_instance = shap_values[1][0]
+                if len(shap_values) == 2:
+                    # 二分类，有两个数组 [良性SHAP值, 恶性SHAP值]
+                    shap_val_for_instance = shap_values[1][0]  # 恶性类的SHAP值
+                elif len(shap_values) == 1:
+                    # 只有一个数组
+                    shap_val_for_instance = shap_values[0][0]
+                else:
+                    # 其他情况
+                    shap_val_for_instance = shap_values[0][0]
             else:
+                # 不是列表，直接使用
                 shap_val_for_instance = shap_values[0]
+            
+            print(f"SHAP values for instance: {shap_val_for_instance}")
+            print(f"SHAP values shape: {np.shape(shap_val_for_instance)}")
             
             # ------------------ 显示预测结果 ------------------
             st.header("📊 预测结果")
@@ -166,23 +200,33 @@ if predict_button and model is not None:
             st.header("🧠 模型决策解释 (SHAP力力图)")
             st.markdown(f"**基础值**: {base_value:.4f} (模型在训练数据上的平均预测)")
             
-            # 创建力力图
-            fig, ax = plt.subplots(figsize=(10, 4))
-            
-            # 创建force_plot
-            shap.force_plot(
-                base_value=base_value,
-                shap_values=shap_val_for_instance,
-                features=input_df.iloc[0],
-                feature_names=selected_features,
-                matplotlib=True,
-                show=False,
-                text_rotation=15
-            )
-            
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.clf()
+            # 创建力力图 - 使用安全的绘图方式
+            try:
+                fig, ax = plt.subplots(figsize=(10, 4))
+                
+                # 使用force_plot
+                shap.force_plot(
+                    base_value=base_value,
+                    shap_values=shap_val_for_instance,
+                    features=input_df.iloc[0],
+                    feature_names=selected_features,
+                    matplotlib=True,
+                    show=False,
+                    text_rotation=15
+                )
+                
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.clf()
+                
+                st.caption("""
+                **解读**：红色特征将预测推向恶性，蓝色特征将预测推向良性。
+                所有特征影响力的总和将预测值从"基础值"推到了最终的预测概率。
+                """)
+                
+            except Exception as e:
+                st.warning(f"无法生成SHAP力力图: {e}")
+                st.info("使用替代的可视化方式...")
             
             # ------------------ 特征影响分析 ------------------
             st.header("📈 特征影响分析")
@@ -200,6 +244,7 @@ if predict_button and model is not None:
             impact_df = impact_df.sort_values('绝对影响', ascending=False)
             
             # 显示表格
+            st.subheader("特征影响明细表")
             st.dataframe(
                 impact_df[['特征', '特征值', 'SHAP值', '影响方向']].style.format({
                     '特征值': '{:.3f}',
@@ -209,6 +254,8 @@ if predict_button and model is not None:
             )
             
             # ------------------ 可视化特征影响 ------------------
+            st.subheader("特征影响力条形图")
+            
             fig = go.Figure()
             
             # 添加条形图
@@ -237,8 +284,8 @@ if predict_button and model is not None:
             
             st.plotly_chart(fig, use_container_width=True)
             
-            # ------------------ 临床建议 ------------------
-            st.header("💡 临床解读与建议")
+            # ------------------ 临床解读 ------------------
+            st.header("💡 临床解读")
             
             # 找出最重要的风险因素和保护因素
             top_risk = impact_df[impact_df['SHAP值'] > 0].head(2)
@@ -247,20 +294,22 @@ if predict_button and model is not None:
             col_a, col_b = st.columns(2)
             
             with col_a:
-                st.subheader("主要风险因素")
+                st.subheader("主要风险驱动因素")
                 if not top_risk.empty:
                     for _, row in top_risk.iterrows():
                         st.markdown(f"**{row['特征']}** = {row['特征值']:.3f}")
-                        st.markdown(f"贡献: +{row['SHAP值']:.4f} (增加恶性风险)")
+                        st.markdown(f"贡献: **+{row['SHAP值']:.4f}**")
+                        st.markdown("该特征值显著增加了恶性风险")
                 else:
                     st.info("未识别出明显的风险因素")
             
             with col_b:
-                st.subheader("主要保护因素")
+                st.subheader("主要良性指标")
                 if not top_protective.empty:
                     for _, row in top_protective.iterrows():
                         st.markdown(f"**{row['特征']}** = {row['特征值']:.3f}")
-                        st.markdown(f"贡献: {row['SHAP值']:.4f} (降低恶性风险)")
+                        st.markdown(f"贡献: **{row['SHAP值']:.4f}**")
+                        st.markdown("该特征值有助于降低恶性风险")
                 else:
                     st.info("未识别出明显的保护因素")
             
@@ -268,7 +317,7 @@ if predict_button and model is not None:
             st.subheader("后续步骤建议")
             if probability > 0.7:
                 st.warning("""
-                **强烈建议进一步检查：**
+                **高风险 - 强烈建议进一步检查：**
                 1. 立即咨询乳腺外科或肿瘤科专家
                 2. 考虑进行穿刺活检以明确诊断
                 3. 进行乳腺超声或钼靶检查
@@ -276,14 +325,14 @@ if predict_button and model is not None:
                 """)
             elif probability > 0.3:
                 st.warning("""
-                **建议进一步评估：**
+                **中风险 - 建议进一步评估：**
                 1. 咨询专科医生进行评估
                 2. 考虑进行影像学检查
                 3. 密切观察，3-6个月后复查
                 """)
             else:
                 st.info("""
-                **建议常规随访：**
+                **低风险 - 建议常规随访：**
                 1. 按照常规筛查计划进行
                 2. 保持健康生活方式
                 3. 定期进行乳房自查
@@ -296,6 +345,8 @@ if predict_button and model is not None:
                 
         except Exception as e:
             st.error(f"预测过程中出现错误: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
             st.info("请检查模型文件和输入数据是否正确。")
 
 elif not predict_button:
@@ -303,10 +354,11 @@ elif not predict_button:
     st.info("👈 请在左侧侧边栏输入特征值，然后点击 **'进行诊断预测'** 按钮。")
     
     # 显示特征说明
-    if feature_info and 'feature_importance' in feature_info:
+    if feature_info and 'selected_features' in feature_info:
         st.subheader("模型使用的关键特征")
-        importance_df = pd.DataFrame(feature_info['feature_importance'])
-        st.dataframe(importance_df.sort_values('importance', ascending=False), use_container_width=True)
+        st.write("以下6个特征用于预测乳腺癌良恶性：")
+        for i, feat in enumerate(selected_features, 1):
+            st.write(f"{i}. **{feat}**")
 
 else:
     st.error("⚠️ 模型加载失败，请确保模型文件存在并格式正确。")
