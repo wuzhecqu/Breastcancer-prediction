@@ -1,0 +1,36 @@
+{
+  "selected_features": [
+    "radius_worst",
+    "concave points_mean",
+    "radius_se",
+    "concavity_worst",
+    "area_worst",
+    "compactness_mean"
+  ],
+  "feature_importance": [
+    {
+      "feature": "concave points_mean",
+      "importance": 1634.8512534646432
+    },
+    {
+      "feature": "radius_worst",
+      "importance": 1094.1243833277722
+    },
+    {
+      "feature": "area_worst",
+      "importance": 1011.6311856948967
+    },
+    {
+      "feature": "concavity_worst",
+      "importance": 631.3758836486971
+    },
+    {
+      "feature": "compactness_mean",
+      "importance": 155.08753404058265
+    },
+    {
+      "feature": "radius_se",
+      "importance": 142.4661738858761
+    }
+  ]
+}

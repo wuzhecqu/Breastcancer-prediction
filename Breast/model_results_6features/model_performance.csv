@@ -1,0 +1,19 @@
+,accuracy,precision,recall,f1,roc_auc,model
+Decision Tree,0.9473684210526315,0.95,0.9047619047619048,0.9268292682926829,0.9545304232804233,"DecisionTreeClassifier(max_depth=5, random_state=42)"
+KNN,0.956140350877193,1.0,0.8809523809523809,0.9367088607594937,0.9933862433862435,KNeighborsClassifier()
+Logistic Regression,0.956140350877193,1.0,0.8809523809523809,0.9367088607594937,0.998015873015873,"LogisticRegression(max_iter=1000, random_state=42)"
+Random Forest,0.9649122807017544,1.0,0.9047619047619048,0.9500000000000001,0.991898148148148,RandomForestClassifier(random_state=42)
+SVM,0.9649122807017544,1.0,0.9047619047619048,0.9500000000000001,0.998015873015873,"SVC(probability=True, random_state=42)"
+Neural Network,0.9649122807017544,0.975,0.9285714285714286,0.951219512195122,0.9950396825396824,"MLPClassifier(hidden_layer_sizes=(100, 50), max_iter=1000, random_state=42)"
+XGBoost,0.9736842105263158,0.975609756097561,0.9523809523809523,0.963855421686747,0.9950396825396826,"XGBClassifier(base_score=None, booster=None, callbacks=None,
+              colsample_bylevel=None, colsample_bynode=None,
+              colsample_bytree=None, device=None, early_stopping_rounds=None,
+              enable_categorical=False, eval_metric='logloss',
+              feature_types=None, gamma=None, grow_policy=None,
+              importance_type=None, interaction_constraints=None,
+              learning_rate=None, max_bin=None, max_cat_threshold=None,
+              max_cat_to_onehot=None, max_delta_step=None, max_depth=None,
+              max_leaves=None, min_child_weight=None, missing=nan,
+              monotone_constraints=None, multi_strategy=None, n_estimators=100,
+              n_jobs=None, num_parallel_tree=None, random_state=42, ...)"
+LightGBM,0.9736842105263158,0.975609756097561,0.9523809523809523,0.963855421686747,0.998015873015873,LGBMClassifier(random_state=42)
