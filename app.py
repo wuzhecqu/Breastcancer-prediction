@@ -301,42 +301,42 @@ if option == "🔍 单样本预测":
                     st.plotly_chart(fig_shap, use_container_width=True)
                     
                     # 尝试生成力力图
-                    try:
-                        st.subheader("SHAP力力图")
-                        # 获取基础值
-                        expected_value = explainer.expected_value
-                        if isinstance(expected_value, np.ndarray):
-                            if len(expected_value) >= 2:
-                                base_value = float(expected_value[1])
-                            else:
-                                base_value = float(expected_value[0])
-                        else:
-                            base_value = float(expected_value)
+                    # try:
+                    #     st.subheader("SHAP力力图")
+                    #     # 获取基础值
+                    #     expected_value = explainer.expected_value
+                    #     if isinstance(expected_value, np.ndarray):
+                    #         if len(expected_value) >= 2:
+                    #             base_value = float(expected_value[1])
+                    #         else:
+                    #             base_value = float(expected_value[0])
+                    #     else:
+                    #         base_value = float(expected_value)
                         
-                        # 创建力力图
-                        fig, ax = plt.subplots(figsize=(10, 4))
-                        shap.force_plot(
-                            base_value=base_value,
-                            shap_values=shap_vals,
-                            features=input_df.iloc[0],
-                            feature_names=selected_features,
-                            matplotlib=True,
-                            show=False
-                        )
-                        plt.tight_layout()
-                        st.pyplot(fig)
-                        plt.clf()
+                    #     # 创建力力图
+                    #     fig, ax = plt.subplots(figsize=(10, 4))
+                    #     shap.force_plot(
+                    #         base_value=base_value,
+                    #         shap_values=shap_vals,
+                    #         features=input_df.iloc[0],
+                    #         feature_names=selected_features,
+                    #         matplotlib=True,
+                    #         show=False
+                    #     )
+                    #     plt.tight_layout()
+                    #     st.pyplot(fig)
+                    #     plt.clf()
                         
-                        st.caption("""
-                        **力力图解读**:
-                        - 红色箭头: 增加恶性风险的特征
-                        - 蓝色箭头: 降低恶性风险的特征  
-                        - 基础值: 模型在所有患者上的平均预测
-                        - 最终值: 当前患者的预测概率
-                        """)
+                    #     st.caption("""
+                    #     **力力图解读**:
+                    #     - 红色箭头: 增加恶性风险的特征
+                    #     - 蓝色箭头: 降低恶性风险的特征  
+                    #     - 基础值: 模型在所有患者上的平均预测
+                    #     - 最终值: 当前患者的预测概率
+                    #     """)
                         
-                    except Exception as e:
-                        st.info("力力图生成跳过，SHAP条形图已提供完整的特征影响分析")
+                    # except Exception as e:
+                    #     st.info("力力图生成跳过，SHAP条形图已提供完整的特征影响分析")
                     
                     # 临床解读
                     st.subheader("💡 临床解读")
@@ -669,3 +669,4 @@ st.sidebar.info("""
 # 添加刷新按钮
 if st.sidebar.button("🔄 刷新应用"):
     st.rerun()
+
