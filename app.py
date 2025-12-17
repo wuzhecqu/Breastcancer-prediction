@@ -43,56 +43,40 @@ def load_artifacts():
 model, scaler, explainer, expected_value, feature_info = load_artifacts()
 
 # ------------------ 侧边栏：用户输入 ------------------
+# 在侧边栏输入部分，确保所有数值类型一致
 st.sidebar.header("🔬 输入患者特征值")
 
-# 从feature_info获取选中的特征列表
-if feature_info:
-    selected_features = feature_info['selected_features']
-else:
-    # 默认特征列表（应与训练时一致）
-    selected_features = [
-        'radius_worst',
-        'concave points_mean',
-        'radius_se',
-        'concavity_worst',
-        'area_worst',
-        'compactness_mean'
-    ]
+selected_features = [
+    'radius_worst', 'concave points_mean', 'radius_se',
+    'concavity_worst', 'area_worst', 'compactness_mean'
+]
 
-# 为每个特征创建输入滑块，并附上参考范围提示
 feature_inputs = {}
 for feat in selected_features:
-    # 根据特征定义不同的合理范围和默认值（这里需根据你的数据分布调整）
+    # 确保step是浮点数
     if feat == 'radius_worst':
-        min_val, max_val, default_val = 10.0, 30.0, 15.0
-        step = 0.1
+        min_val, max_val, default_val, step_val = 10.0, 30.0, 15.0, 0.1
     elif feat == 'concave points_mean':
-        min_val, max_val, default_val = 0.0, 0.2, 0.05
-        step = 0.001
+        min_val, max_val, default_val, step_val = 0.0, 0.2, 0.05, 0.001
     elif feat == 'radius_se':
-        min_val, max_val, default_val = 0.2, 2.0, 0.5
-        step = 0.01
+        min_val, max_val, default_val, step_val = 0.2, 2.0, 0.5, 0.01
     elif feat == 'concavity_worst':
-        min_val, max_val, default_val = 0.0, 0.5, 0.1
-        step = 0.01
+        min_val, max_val, default_val, step_val = 0.0, 0.5, 0.1, 0.01
     elif feat == 'area_worst':
-        min_val, max_val, default_val = 500, 2000, 800
-        step = 10
+        min_val, max_val, default_val, step_val = 500.0, 2000.0, 800.0, 10.0  # 注意：10.0不是10
     elif feat == 'compactness_mean':
-        min_val, max_val, default_val = 0.05, 0.3, 0.15
-        step = 0.001
+        min_val, max_val, default_val, step_val = 0.05, 0.3, 0.15, 0.001
     else:
-        min_val, max_val, default_val = 0.0, 1.0, 0.5
-        step = 0.01
-
-    # 创建滑块
-    value = st.sidebar.slider(
-        label=f"{feat}",
+        min_val, max_val, default_val, step_val = 0.0, 1.0, 0.5, 0.01
+    
+    # 显式转换为float，确保类型一致
+    value = st.slider(
+        label=feat,
         min_value=float(min_val),
         max_value=float(max_val),
         value=float(default_val),
-        step=step,
-        help=f"典型范围: {min_val} - {max_val}"
+        step=float(step_val),  # 关键修复点
+        format="%.3f" if step_val < 0.01 else "%.1f"
     )
     feature_inputs[feat] = value
 
@@ -284,4 +268,5 @@ else:
 st.markdown("---")
 st.caption("""
 *注意：本工具旨在辅助临床决策，不能替代执业医师的专业诊断。所有预测结果均应结合完整的临床资料进行解读[citation:2]。*
+
 """)
