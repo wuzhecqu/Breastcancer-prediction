@@ -25,6 +25,8 @@ def load_artifacts():
         model = joblib.load('lightgbm_model.pkl')
         scaler = joblib.load('scaler.pkl')
         
+        print(f"模型类型: {type(model)}")
+        
         # 加载特征信息
         try:
             with open('feature_info.json', 'r', encoding='utf-8') as f:
@@ -42,7 +44,6 @@ def load_artifacts():
             feature_info = {'selected_features': selected_features}
         
         # 创建背景数据用于SHAP解释器
-        # 使用简化的小样本背景数据
         background = np.zeros((5, len(selected_features)))
         background_df = pd.DataFrame(background, columns=selected_features)
         background_scaled = scaler.transform(background_df)
@@ -50,12 +51,11 @@ def load_artifacts():
         # 创建SHAP解释器
         explainer = shap.TreeExplainer(model, background_scaled)
         
-        # 获取期望值 - 处理不同格式
+        # 获取期望值
         expected_val = explainer.expected_value
         
-        # 调试信息
         print(f"Expected value type: {type(expected_val)}")
-        print(f"Expected value shape: {np.shape(expected_val)}")
+        print(f"Expected value shape: {np.shape(expected_val) if hasattr(expected_val, 'shape') else 'N/A'}")
         print(f"Expected value: {expected_val}")
         
         # 处理expected_value的格式
@@ -68,6 +68,11 @@ def load_artifacts():
                 base_value = float(expected_val[0])
             else:
                 base_value = float(expected_val[0])
+        elif isinstance(expected_val, (list, tuple)):
+            if len(expected_val) == 2:
+                base_value = float(expected_val[1])
+            else:
+                base_value = float(expected_val[0])
         else:
             # 单个标量值
             base_value = float(expected_val)
@@ -78,6 +83,9 @@ def load_artifacts():
         
     except Exception as e:
         print(f"Error loading artifacts: {e}")
+        import traceback
+        print(traceback.format_exc())
+        
         # 返回默认值
         selected_features = [
             'radius_worst', 'concave points_mean', 'radius_se',
@@ -136,21 +144,64 @@ if predict_button and model is not None:
             input_df = input_df[selected_features]  # 确保列顺序
             input_scaled = scaler.transform(input_df)
             
-            # 2. 进行预测
-            # LightGBM预测恶性概率
-            probability = model.predict_proba(input_scaled)[0][1]  # 获取恶性类概率
+            # 2. 进行预测 - 修复：使用正确的预测方法
+            print(f"模型类型: {type(model)}")
+            
+            # 方法1：尝试不同的预测方法
+            try:
+                # 首先尝试predict_proba（适用于scikit-learn包装器）
+                if hasattr(model, 'predict_proba'):
+                    probability = model.predict_proba(input_scaled)[0][1]
+                    print(f"使用 predict_proba, 概率: {probability}")
+                else:
+                    # 方法2：使用predict并转换为概率
+                    raw_pred = model.predict(input_scaled, raw_score=True)
+                    print(f"原始预测值: {raw_pred}")
+                    
+                    # 将原始分数转换为概率（使用sigmoid函数）
+                    if isinstance(raw_pred, np.ndarray) and len(raw_pred) > 0:
+                        raw_score = raw_pred[0]
+                    else:
+                        raw_score = float(raw_pred)
+                    
+                    # Sigmoid函数：1 / (1 + exp(-x))
+                    probability = 1 / (1 + np.exp(-raw_score))
+                    print(f"转换后的概率: {probability}")
+            except Exception as pred_error:
+                print(f"预测错误: {pred_error}")
+                # 方法3：直接使用predict
+                pred = model.predict(input_scaled)
+                if isinstance(pred, np.ndarray) and len(pred) > 0:
+                    pred_value = pred[0]
+                else:
+                    pred_value = float(pred)
+                
+                # 如果预测值已经是概率（在0-1之间）
+                if 0 <= pred_value <= 1:
+                    probability = pred_value
+                else:
+                    # 假设是分类标签，转换为概率
+                    probability = 1.0 if pred_value > 0.5 else 0.0
+            
+            # 确保概率在合理范围内
+            probability = max(0.0, min(1.0, float(probability)))
+            
             prediction = 1 if probability > 0.5 else 0
             prediction_label = "恶性 (M)" if prediction == 1 else "良性 (B)"
+            
+            print(f"最终概率: {probability}, 预测: {prediction_label}")
             
             # 3. 计算SHAP值
             shap_values = explainer.shap_values(input_scaled)
             
             # 调试信息
             print(f"SHAP values type: {type(shap_values)}")
-            print(f"SHAP values length if list: {len(shap_values) if isinstance(shap_values, list) else 'Not list'}")
             
-            # 处理SHAP值的格式 - 根据警告信息，SHAP值现在是列表格式
+            # 处理SHAP值的格式
+            shap_val_for_instance = None
+            
             if isinstance(shap_values, list):
+                print(f"SHAP values list length: {len(shap_values)}")
                 if len(shap_values) == 2:
                     # 二分类，有两个数组 [良性SHAP值, 恶性SHAP值]
                     shap_val_for_instance = shap_values[1][0]  # 恶性类的SHAP值
@@ -164,8 +215,11 @@ if predict_button and model is not None:
                 # 不是列表，直接使用
                 shap_val_for_instance = shap_values[0]
             
+            if shap_val_for_instance is None:
+                # 尝试直接获取
+                shap_val_for_instance = explainer.shap_values(input_scaled, check_additivity=False)[0]
+            
             print(f"SHAP values for instance: {shap_val_for_instance}")
-            print(f"SHAP values shape: {np.shape(shap_val_for_instance)}")
             
             # ------------------ 显示预测结果 ------------------
             st.header("📊 预测结果")
@@ -200,7 +254,7 @@ if predict_button and model is not None:
             st.header("🧠 模型决策解释 (SHAP力力图)")
             st.markdown(f"**基础值**: {base_value:.4f} (模型在训练数据上的平均预测)")
             
-            # 创建力力图 - 使用安全的绘图方式
+            # 创建力力图
             try:
                 fig, ax = plt.subplots(figsize=(10, 4))
                 
@@ -226,7 +280,14 @@ if predict_button and model is not None:
                 
             except Exception as e:
                 st.warning(f"无法生成SHAP力力图: {e}")
-                st.info("使用替代的可视化方式...")
+                
+                # 提供替代解释
+                st.info("""
+                **特征影响分析**：
+                - 正SHAP值：增加恶性风险
+                - 负SHAP值：降低恶性风险
+                - 绝对值越大，影响越强
+                """)
             
             # ------------------ 特征影响分析 ------------------
             st.header("📈 特征影响分析")
@@ -299,7 +360,10 @@ if predict_button and model is not None:
                     for _, row in top_risk.iterrows():
                         st.markdown(f"**{row['特征']}** = {row['特征值']:.3f}")
                         st.markdown(f"贡献: **+{row['SHAP值']:.4f}**")
-                        st.markdown("该特征值显著增加了恶性风险")
+                        if 'radius' in row['特征'].lower():
+                            st.markdown("半径值较大可能指示肿瘤生长活跃")
+                        elif 'concave' in row['特征'].lower():
+                            st.markdown("凹点特征明显可能指示细胞形态异常")
                 else:
                     st.info("未识别出明显的风险因素")
             
@@ -309,7 +373,10 @@ if predict_button and model is not None:
                     for _, row in top_protective.iterrows():
                         st.markdown(f"**{row['特征']}** = {row['特征值']:.3f}")
                         st.markdown(f"贡献: **{row['SHAP值']:.4f}**")
-                        st.markdown("该特征值有助于降低恶性风险")
+                        if 'area' in row['特征'].lower():
+                            st.markdown("面积特征在正常范围内")
+                        elif 'compactness' in row['特征'].lower():
+                            st.markdown("紧致度正常表明细胞形状规则")
                 else:
                     st.info("未识别出明显的保护因素")
             
